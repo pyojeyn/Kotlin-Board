@@ -6,4 +6,6 @@ import org.springframework.stereotype.Repository
 import java.math.BigInteger
 
 @Repository
-interface FoodsRepository : JpaRepository<Foods, BigInteger>
+interface FoodsRepository : JpaRepository<Foods, BigInteger>{
+    fun findAllByFoodNmContaining(keyword: String): List<Foods>
+}

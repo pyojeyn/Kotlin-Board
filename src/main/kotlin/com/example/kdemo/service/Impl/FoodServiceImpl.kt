@@ -1,6 +1,7 @@
 package com.example.kdemo.service.Impl
 
 import com.example.kdemo.dto.foods.CreateFoodsResponseDto
+import com.example.kdemo.dto.foods.SearchFoodsResponseDto
 import com.example.kdemo.entity.Foods
 import com.example.kdemo.exception.FoodException
 import com.example.kdemo.repository.FoodsRepository
@@ -10,32 +11,37 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import jakarta.transaction.Transactional
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.data.redis.core.Cursor
+import org.springframework.data.redis.core.HashOperations
+import org.springframework.data.redis.core.RedisTemplate
+import org.springframework.data.redis.core.ScanOptions
 import org.springframework.stereotype.Service
+import java.lang.Boolean
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import kotlin.Any
+import kotlin.Exception
+import kotlin.IllegalStateException
+import kotlin.String
 
 
 @Service
 @Transactional
-class FoodServiceImpl(private val foodsRepository: FoodsRepository): FoodsService {
+class FoodServiceImpl(private val foodsRepository: FoodsRepository, private val redisTemplate: RedisTemplate<String, Any>): FoodsService {
 
     @Value("\${food.serviceKey}")
     lateinit var serviceKey: String
 
     override fun createFood(): CreateFoodsResponseDto? {
-        println(serviceKey)
-        println("스레드 상태: ${Thread.currentThread().isInterrupted}")
-
         var res: CreateFoodsResponseDto? = null
-
-        val batchSize = 1000
+        val batchSize = 1500
         var pageNo = 1
 
         while (true){
@@ -85,12 +91,6 @@ class FoodServiceImpl(private val foodsRepository: FoodsRepository): FoodsServic
                     jsonNode["response"]["body"]["items"],
                     object : TypeReference<List<Map<String, Any>>>() {}
                 )
-
-//                val objectMapper = ObjectMapper()
-//                val foodWrapperList: List<CreateFoodsResponseDto.FoodWrapper> = items.map { item ->
-//                    objectMapper.convertValue(item, CreateFoodsResponseDto.FoodWrapper::class.java)
-//                }
-
 
                 val mapper = jacksonObjectMapper()
                 val foodWrapperList: List<CreateFoodsResponseDto.FoodWrapper> = items.map {
@@ -143,7 +143,7 @@ class FoodServiceImpl(private val foodsRepository: FoodsRepository): FoodsServic
                     val srcCd = i["srcCd"]?.toString() ?: ""
                     val srcNm = i["srcNm"]?.toString() ?: ""
                     val servSize = i["servSize"]?.toString() ?: ""
-                    val mfrNm = i["mfrNm"]?.toString() ?: ""
+                    val mfrNm = i["restNm"]?.toString() ?: ""
                     val foodSize = i["foodSize"]?.toString() ?: ""
                     val imptNm = i["imptNm"]?.toString() ?: ""
                     val distNm = i["distNm"]?.toString() ?: ""
@@ -155,7 +155,7 @@ class FoodServiceImpl(private val foodsRepository: FoodsRepository): FoodsServic
                     val crtYmd = i["crtYmd"]?.toString() ?: ""
                     val crtrYmd = i["crtrYmd"]?.toString() ?: ""
                     val insttCode = i["insttCode"]?.toString() ?: ""
-                    val bfFoodNm = i["bfFoodNm"]?.toString() ?: ""
+                    val bfFoodNm = i["foodNm"]?.toString() ?: ""
                     var afFoodNm = ""
                     if (bfFoodNm != "") {
                         val splitFoodNm = bfFoodNm.split("_".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
@@ -244,5 +244,170 @@ class FoodServiceImpl(private val foodsRepository: FoodsRepository): FoodsServic
             }
         }
         return res
+    }
+
+    override fun searchFoodByDB(requestParam: String): CreateFoodsResponseDto {
+        val foods = foodsRepository.findAllByFoodNmContaining(requestParam)
+        println("총 개수: ${foods.size}")
+        val fl = foods.map { f ->
+            CreateFoodsResponseDto.FoodWrapper(
+                foodNm = f.foodNm ?: "",
+                foodCd = f.foodCd ?: "",
+                dataCd = f.dataCd ?: "",
+                typeNm = f.typeNm ?: "",
+                foodOriginCd = f.foodOriginCd ?: "",
+                foodOriginNm = f.foodOriginNm ?: "",
+                foodLv3Cd = f.foodLv3Cd ?: "",
+                foodLv3Nm = f.foodLv3Nm ?: "",
+                foodLv4Cd = f.foodLv4Cd ?: "",
+                foodLv4Nm = f.foodLv4Nm ?: "",
+                foodLv5Cd = f.foodLv5Cd ?: "",
+                foodLv5Nm = f.foodLv5Nm ?: "",
+                foodLv6Cd = f.foodLv6Cd ?: "",
+                foodLv6Nm = f.foodLv6Nm ?: "",
+                foodLv7Cd = f.foodLv7Cd ?: "",
+                foodLv7Nm = f.foodLv7Nm ?: "",
+                nutConSrtrQua = f.nutConSrtrQua ?: "",
+                unitOfNutConSrtrQua = f.unitOfNutConSrtrQua ?: "",
+                enerc = f.energyCalorie ?: "",
+                water = f.water ?: "",
+                prot = f.protein ?: "",
+                fatce = f.fat ?: "",
+                ash = f.ash ?: "",
+                chocdf = f.carbohydrate ?: "",
+                sugar = f.sugar ?: "",
+                fibtg = f.fiber ?: "",
+                ca = f.calcium ?: "",
+                fe = f.fe ?: "",
+                p = f.p ?: "",
+                k = f.kalium ?: "",
+                nat = f.natrium ?: "",
+                vitaRae = f.vitaRae ?: "",
+                retol = f.retinol ?: "",
+                cartb = f.betaCarotene ?: "",
+                thia = f.thiamine ?: "",
+                ribf = f.riboflavin ?: "",
+                nia = f.niacin ?: "",
+                vitc = f.vitaminC ?: "",
+                vitd = f.vitaminD ?: "",
+                chole = f.cholesterol ?: "",
+                fasat = f.saturatedFat ?: "",
+                fatrn = f.transFat ?: "",
+                srcCd = f.srcCd ?: "",
+                srcNm = f.srcNm ?: "",
+                servSize = f.servSize ?: "",
+                restNm = f.manufacturerName ?: "",
+                foodSize = f.foodSize ?: "",
+                imptNm = f.importerName ?: "",
+                distNm = f.distributorName ?: "",
+                imptYn = f.importYn ?: "",
+                cooCd = f.countryOfOriginCd ?: "",
+                cooNm = f.countryOfOriginNm ?: "",
+                dataProdCd = f.dataProdCd ?: "",
+                dataProdNm = f.dataProdNm ?: "",
+                crtYmd = f.dataCreationDate ?: "",
+                crtrYmd = f.dataReferenceDate ?: "",
+                insttCode = f.insttCode ?: ""
+            )
+        }
+
+        val res = CreateFoodsResponseDto(foodWrappers = fl)
+
+        return res
+    }
+
+    override fun searchFoodByRedis(requestParam: String): SearchFoodsResponseDto {
+        val cacheKey: String = "foodName:$requestParam"
+        val hashOperations: HashOperations<String, String, SearchFoodsResponseDto.FoodWrapper> =
+            redisTemplate.opsForHash()
+
+        val foodWrappers: MutableList<SearchFoodsResponseDto.FoodWrapper>
+
+
+        if (Boolean.TRUE == redisTemplate.hasKey(cacheKey)) {
+            val scanOptions = ScanOptions.scanOptions().match("*").build()
+            val cursor: Cursor<Map.Entry<String, SearchFoodsResponseDto.FoodWrapper>> =
+                hashOperations.scan(cacheKey, scanOptions)
+            foodWrappers = ArrayList<SearchFoodsResponseDto.FoodWrapper>()
+            while (cursor.hasNext()) {
+                val entry: Map.Entry<String, SearchFoodsResponseDto.FoodWrapper> = cursor.next()
+                foodWrappers.add(entry.value)
+            }
+        } else {
+            val foods = foodsRepository.findAllByFoodNmContaining(requestParam)
+            foodWrappers = foods.map { f ->
+                SearchFoodsResponseDto.FoodWrapper(
+                    foodId = f.foodId?.toInt().toString() ?: "",
+                    foodNm = f.foodNm ?: "",
+                    foodCd = f.foodCd ?: "",
+                    dataCd = f.dataCd ?: "",
+                    typeNm = f.typeNm ?: "",
+                    foodOriginCd = f.foodOriginCd ?: "",
+                    foodOriginNm = f.foodOriginNm ?: "",
+                    foodLv3Cd = f.foodLv3Cd ?: "",
+                    foodLv3Nm = f.foodLv3Nm ?: "",
+                    foodLv4Cd = f.foodLv4Cd ?: "",
+                    foodLv4Nm = f.foodLv4Nm ?: "",
+                    foodLv5Cd = f.foodLv5Cd ?: "",
+                    foodLv5Nm = f.foodLv5Nm ?: "",
+                    foodLv6Cd = f.foodLv6Cd ?: "",
+                    foodLv6Nm = f.foodLv6Nm ?: "",
+                    foodLv7Cd = f.foodLv7Cd ?: "",
+                    foodLv7Nm = f.foodLv7Nm ?: "",
+                    nutConSrtrQua = f.nutConSrtrQua ?: "",
+                    unitOfNutConSrtrQua = f.unitOfNutConSrtrQua ?: "",
+                    enerc = f.energyCalorie ?: "",
+                    water = f.water ?: "",
+                    prot = f.protein ?: "",
+                    fatce = f.fat ?: "",
+                    ash = f.ash ?: "",
+                    chocdf = f.carbohydrate ?: "",
+                    sugar = f.sugar ?: "",
+                    fibtg = f.fiber ?: "",
+                    ca = f.calcium ?: "",
+                    fe = f.fe ?: "",
+                    p = f.p ?: "",
+                    k = f.kalium ?: "",
+                    nat = f.natrium ?: "",
+                    vitaRae = f.vitaRae ?: "",
+                    retol = f.retinol ?: "",
+                    cartb = f.betaCarotene ?: "",
+                    thia = f.thiamine ?: "",
+                    ribf = f.riboflavin ?: "",
+                    nia = f.niacin ?: "",
+                    vitc = f.vitaminC ?: "",
+                    vitd = f.vitaminD ?: "",
+                    chole = f.cholesterol ?: "",
+                    fasat = f.saturatedFat ?: "",
+                    fatrn = f.transFat ?: "",
+                    srcCd = f.srcCd ?: "",
+                    srcNm = f.srcNm ?: "",
+                    servSize = f.servSize ?: "",
+                    restNm = f.manufacturerName ?: "",
+                    foodSize = f.foodSize ?: "",
+                    imptNm = f.importerName ?: "",
+                    distNm = f.distributorName ?: "",
+                    imptYn = f.importYn ?: "",
+                    cooCd = f.countryOfOriginCd ?: "",
+                    cooNm = f.countryOfOriginNm ?: "",
+                    dataProdCd = f.dataProdCd ?: "",
+                    dataProdNm = f.dataProdNm ?: "",
+                    crtYmd = f.dataCreationDate ?: "",
+                    crtrYmd = f.dataReferenceDate ?: "",
+                    insttCode = f.insttCode ?: ""
+                )
+            }.toMutableList()
+
+            if (foodWrappers.isNotEmpty()) {
+                for (f in foodWrappers) {
+                    hashOperations.put(cacheKey, f.foodId?.toInt().toString(), f)
+                }
+                redisTemplate.expire(cacheKey, 1, TimeUnit.HOURS)
+            }
+        }
+        println("총 개수: ${foodWrappers.size}")
+        return SearchFoodsResponseDto(
+            foodWrappers = foodWrappers
+        )
     }
 }
